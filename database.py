@@ -47,7 +47,7 @@ class Database:
                     doc[key] = self.serialize_mongo_document(value)
         return doc
     
-    def save_conversation(self, session_id, user_message, bot_response, message_type='analysis', context_used=0, user_id=None):
+    def save_conversation(self, session_id, user_message, bot_response, message_type='analysis', context_used=0, user_id=None, similarity_score=0.0):
         """Sauvegarde une conversation"""
         try:
             conversation_data = {
@@ -58,6 +58,7 @@ class Database:
                 'bot_response': bot_response,
                 'message_type': message_type,
                 'context_used': context_used,
+                'similarity_score': similarity_score,
                 'timestamp': datetime.utcnow()
             }
             
@@ -127,11 +128,36 @@ class Database:
             daily_activity_cursor = self.conversations_collection.aggregate(pipeline)
             daily_activity = [(item['_id'], item['count']) for item in daily_activity_cursor]
             
+            # Statistiques de similarité moyenne
+            pipeline_similarity = [
+                {'$match': {**filter_query, 'similarity_score': {'$exists': True, '$ne': None}}},
+                {
+                    '$group': {
+                        '_id': None,
+                        'avg_similarity': {'$avg': '$similarity_score'},
+                        'max_similarity': {'$max': '$similarity_score'},
+                        'min_similarity': {'$min': '$similarity_score'}
+                    }
+                }
+            ]
+            similarity_stats_cursor = self.conversations_collection.aggregate(pipeline_similarity)
+            similarity_stats = list(similarity_stats_cursor)
+            similarity_info = similarity_stats[0] if similarity_stats else {
+                'avg_similarity': 0,
+                'max_similarity': 0,
+                'min_similarity': 0
+            }
+            
             return {
                 'total_conversations': total_conversations,
                 'total_sessions': total_sessions,
                 'message_types': message_types,
-                'daily_activity': daily_activity
+                'daily_activity': daily_activity,
+                'similarity_stats': {
+                    'average': round(similarity_info.get('avg_similarity', 0), 3),
+                    'maximum': round(similarity_info.get('max_similarity', 0), 3),
+                    'minimum': round(similarity_info.get('min_similarity', 0), 3)
+                }
             }
         except Exception as e:
             print(f"Erreur analytics: {e}")

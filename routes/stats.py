@@ -1,9 +1,10 @@
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from collections import Counter
 from services.ai_service import ai_service
 from database import db_instance
 from config import Config
+from services.prediction_service import handle_predictions
 
 stats_bp = Blueprint('stats', __name__)
 
@@ -87,10 +88,8 @@ def get_detailed_analytics():
         if not ai_service.raw_students_data:
             return jsonify({"error": "Données étudiants non chargées"}), 503
         
-        # Métriques avancées
         students = ai_service.raw_students_data
         
-        # Distribution par tranche de notes
         score_ranges = {
             'excellent': len([s for s in students if s['Final_Score'] >= 80]),
             'good': len([s for s in students if 60 <= s['Final_Score'] < 80]),
@@ -98,10 +97,8 @@ def get_detailed_analytics():
             'poor': len([s for s in students if s['Final_Score'] < 40])
         }
         
-        # Distribution du stress
         stress_distribution = Counter(student['Stress_Level (1-10)'] for student in students)
         
-        # Corrélations simples
         high_stress_low_performance = len([
             s for s in students 
             if s['Stress_Level (1-10)'] >= 7 and s['Final_Score'] < 60
@@ -112,7 +109,6 @@ def get_detailed_analytics():
             if s['Attendance (%)'] < 70 and s['Final_Score'] < 60
         ])
         
-        # Analytics utilisateur
         user_analytics = db_instance.get_analytics_data(user_id)
         
         return jsonify({
@@ -132,3 +128,31 @@ def get_detailed_analytics():
         
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+# --- Route pour les prédictions des modèles ---
+@stats_bp.route('/predict', methods=['POST'])
+@jwt_required()
+def predict_student_data():
+    """
+    Accepte les données d'un étudiant et retourne les prédictions des modèles.
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Données JSON manquantes."}), 400
+        
+        # Appel au service de prédiction qui renvoie un dictionnaire
+        predictions = handle_predictions(data)
+
+        # Gérer les erreurs de prédiction
+        if "error" in predictions:
+            status_code = 503 if "initialisé" in predictions["error"] else 500
+            return jsonify(predictions), status_code
+        
+        # Renvoyer la réponse combinée avec un message de succès
+        predictions["message"] = "Prédictions générées avec succès."
+        return jsonify(predictions)
+    
+    except Exception as e:
+        # Gérer les erreurs inattendues, comme des données d'entrée incorrectes
+        return jsonify({"error": f"Une erreur interne est survenue : {str(e)}"}), 500

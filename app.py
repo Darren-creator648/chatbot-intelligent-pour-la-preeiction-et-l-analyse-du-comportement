@@ -32,8 +32,10 @@ def create_app():
 
 def init_background():
     """Initialise le système IA en arrière-plan"""
+    
     from services.ai_service import ai_service
     ai_service.initialize_system()
+    
 
 if __name__ == '__main__':
     # Créer l'application
