@@ -9,8 +9,8 @@ import language_tool_python
 from config import Config
 import joblib 
 import pandas as pd
-import google.generativeai as genai  # <-- Import de la librairie Google
-import openai   # <-- Import de la librairie OpenAI pour OpenRouter  
+import google.generativeai as genai 
+import openai 
 
 class AIService:
     def __init__(self):
@@ -21,13 +21,16 @@ class AIService:
         self.raw_students_data = []
         # Renommer les attributs pour correspondre aux modèles entraînés
         self.grade_prediction_model = None
+        self.grade_prediction_preprocessor = None # <-- Ajout du pré-processeur
         self.anxiety_prediction_model = None
+        
         # Configuration de l'API OpenRouter
         try:
             if Config.OPENROUTER_API_KEY:
                 self.api_client = openai.OpenAI(
                     base_url="https://openrouter.ai/api/v1",
-                    api_key=Config.OPENROUTER_API_KEY
+                    api_key=Config.OPENROUTER_API_KEY,
+                    
                 )
                 print("✅ Client OpenRouter configuré avec succès.")
             else:
@@ -36,7 +39,7 @@ class AIService:
         except Exception as e:
             print(f"❌ Erreur lors de la configuration de l'API OpenRouter : {e}")
             self.api_client = None
-       
+        
     
     def load_students_from_json(self, json_file):
         """Charge les données étudiants depuis un fichier JSON Ligne par Ligne"""
@@ -120,26 +123,6 @@ class AIService:
         context = "\n".join(top_chunks)
         return context, max_similarity_score
     
-    # === ANCIENNE MÉTHODE AVEC OLLAMA ===
-    # def generate_with_ollama(self, prompt, model_name=None):
-    #     """Génère une réponse avec Ollama"""
-    #     if model_name is None:
-    #         model_name = Config.OLLAMA_MODEL
-            
-    #     try:
-    #         result = subprocess.run(
-    #             ["ollama", "run", model_name],
-    #             input=prompt.encode("utf-8"),
-    #             stdout=subprocess.PIPE,
-    #             stderr=subprocess.PIPE,
-    #             timeout=400
-    #         )
-    #         return result.stdout.decode("utf-8").strip()
-    #     except subprocess.TimeoutExpired:
-    #         return "Désolé, la génération a pris trop de temps."
-    #     except Exception as e:
-    #         return f"Erreur lors de la génération : {str(e)}"
-            
     # === NOUVELLE MÉTHODE AVEC OPENROUTER ===
     def generate_with_openrouter(self, prompt: str) -> str:
         """Génère une réponse avec l'API d'OpenRouter."""
@@ -157,6 +140,7 @@ class AIService:
         except Exception as e:
             print(f"❌ Erreur lors de l'appel à l'API OpenRouter : {e}")
             return "Une erreur est survenue lors de la génération de l'analyse."
+            
     # === Post-traitement de la réponse ===
     
     def postprocess_response(self, response: str) -> str:
@@ -188,7 +172,9 @@ class AIService:
         """Charge les modèles de prédiction depuis le disque."""
         try:
             # Charger les modèles avec les noms de fichiers corrects
-            self.grade_prediction_model = joblib.load('models/grade_prediction_model.joblib')
+            self.grade_prediction_preprocessor = joblib.load('models/leaky_model_correlated_preprocessor.joblib')
+            self.grade_prediction_model = joblib.load('models/leaky_model_correlated_classifier.joblib')
+            
             self.anxiety_prediction_model = joblib.load('models/anxiety_prediction_model.joblib')
             
             print("✅ Modèles de prédiction chargés avec succès.")
@@ -197,14 +183,19 @@ class AIService:
             
     # --- NOUVEAU : Méthodes de prédiction ---
     def predict_grade(self, input_data):
-        """Prédit le grade à partir des données d'entrée."""
-        if self.grade_prediction_model is None:
+        """
+        Prédit le grade à partir des données d'entrée.
+        Utilise le pré-processeur et le classifieur distincts.
+        """
+        if self.grade_prediction_model is None or self.grade_prediction_preprocessor is None:
             return {"error": "Modèle de prédiction de grade non chargé."}
         
         try:
             df = pd.DataFrame([input_data])
-            # Le modèle est un pipeline, il gère le prétraitement tout seul
-            grade_numerical = self.grade_prediction_model.predict(df)[0]
+            # Appliquer le pré-processeur avant de faire la prédiction
+            df_preprocessed = self.grade_prediction_preprocessor.transform(df)
+            
+            grade_numerical = self.grade_prediction_model.predict(df_preprocessed)[0]
             
             # Inverser l'encodage pour afficher la lettre du grade
             grade_map = {0: 'A', 1: 'B', 2: 'C', 3: 'D', 4: 'F'}
@@ -263,6 +254,60 @@ class AIService:
     def is_initialized(self):
         """Vérifie si le système est initialisé"""
         return all([self.model, self.index, self.chunks, self.grade_prediction_model, self.anxiety_prediction_model])
+    # --- NOUVELLE MÉTHODE : Génération d'analyse et de recommandations ---
+    def generate_analysis(self, input_data, grade_prediction, anxiety_prediction):
+        """
+        Génère une analyse textuelle et des recommandations personnalisées
+        à partir des données d'entrée et des prédictions.
+        """
+        # Construction du contexte pour le prompt
+        context = (
+            f"Analyse pour un étudiant avec les caractéristiques suivantes :\n"
+            f"- Âge : {input_data.get('Age')} ans\n"
+            f"- Sexe : {input_data.get('Gender')}\n"
+            f"- Département : {input_data.get('Department')}\n"
+            f"- Heures d'étude par semaine : {input_data.get('Study_Hours_per_Week')}h\n"
+            f"- Heures de sommeil par nuit : {input_data.get('Sleep_Hours_per_Night')}h\n"
+            f"- Niveau de stress : {input_data.get('Stress_Level (1-10)')}/10\n"
+            f"- Activités parascolaires : {input_data.get('Extracurricular_Activities')}\n"
+            f"- Accès internet : {input_data.get('Internet_Access_at_Home')}\n"
+            f"- Note mi-session : {input_data.get('Midterm_Score')}\n"
+            f"- Moyenne des devoirs : {input_data.get('Assignments_Avg')}\n"
+            f"- Moyenne des quiz : {input_data.get('Quizzes_Avg')}\n"
+            f"- Score de participation : {input_data.get('Participation_Score')}\n"
+            f"- Score des projets : {input_data.get('Projects_Score')}\n"
+            f"- Taux de présence : {input_data.get('Attendance (%)')}%\n"
+            f"- Année d'étude : {input_data.get('annee_etude')}\n"
+            f"- Moyenne générale (MGP) : {input_data.get('mgp')}\n"
+            f"- Statut matrimonial : {input_data.get('status')}\n"
+            f"- Dépression : {'Oui' if input_data.get('depression') == 1 else 'Non'}\n"
+            f"- Crises de panique : {'Oui' if input_data.get('crise_de_panique') == 1 else 'Non'}\n"
+            f"- Traitement spécialisé : {'Oui' if input_data.get('traitement_spe') == 1 else 'Non'}\n\n"
+            f"Le grade prédit est : {grade_prediction}\n"
+            f"Le niveau d'anxiété prédit est : {anxiety_prediction}\n\n"
+        )
+        
+        # Instructions pour le modèle de langage
+        instructions = (
+            "En te basant sur ces informations, rédige une analyse claire, concise et professionnelle. "
+            "Fournis des recommandations personnalisées et pratiques pour l'étudiant, en te concentrant sur "
+            "les aspects de la santé mentale et des performances académiques. "
+            "Structure ta réponse de la manière suivante :\n\n"
+            "**Analyse et Synthèse :** Explique brièvement les points forts et faibles de la situation de l'étudiant. "
+            "**Recommandations :** Propose 3 à 5 recommandations personnalisées pour améliorer son grade et sa santé mentale. "
+            "Utilise un ton encourageant et empathique. Rédige en français. Assure-toi que les recommandations sont directement liées aux données fournies (par exemple, si le stress est élevé, recommande des techniques de gestion du stress ; si le sommeil est faible, recommande d'améliorer la qualité du sommeil)."
+        )
+
+        prompt = context + instructions
+        
+        try:
+            generated_text = self.generate_with_openrouter(prompt)
+            # Post-traitement pour améliorer la qualité du texte
+            corrected_text = self.postprocess_response(generated_text)
+            return corrected_text
+        except Exception as e:
+            print(f"❌ Erreur lors de la génération de l'analyse : {e}")
+            return "Une erreur est survenue lors de la génération de l'analyse."
 
 # Instance globale
 ai_service = AIService()

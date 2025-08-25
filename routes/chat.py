@@ -160,7 +160,7 @@ Identifie les facteurs clés (présence, notes, participation, stress, sommeil, 
 Décris les tendances comportementales communes que tu observes dans les profils qui réussissent par rapport à ceux qui rencontrent des difficultés. Par exemple, comment la moyenne des heures de sommeil se compare-t-elle entre les groupes ?
 
 ### 3. Recommandations et plan d'action
-Propose des recommandations concrètes et spécifiques. Pour chaque recommandation, associe-la à un ou plusieurs facteurs identifiés dans ton analyse. Organise tes conseils pour qu'ils soient directement applicables par un éducateur (par exemple, "Encourager les étudiants avec un faible taux de présence à consulter les notes de cours en ligne").
+Propose des recommandations concrètes, realistes et spécifiques. Pour chaque recommandation, associe-la à un ou plusieurs facteurs identifiés dans ton analyse. Organise tes conseils pour qu'ils soient directement applicables par un éducateur (par exemple, "Encourager les étudiants avec un faible taux de présence à consulter les notes de cours en ligne").
 
 Réponse :
 """

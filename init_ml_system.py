@@ -1,14 +1,15 @@
 import pandas as pd
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
 import joblib
 import os
 from imblearn.over_sampling import SMOTE
-from imblearn.pipeline import Pipeline as ImbPipeline
+from xgboost import XGBClassifier
+
+# --- Fonctions utilitaires ---
 
 def load_data(file_path):
     """Charge les données depuis un fichier CSV."""
@@ -27,8 +28,10 @@ def save_model(model, filename):
     joblib.dump(model, os.path.join('models', filename))
     print(f"✅ Modèle '{filename}' sauvegardé avec succès dans le dossier 'models/'.")
 
-def train_and_save_grade_model():
-    """Entraîne et sauvegarde le modèle de prédiction du grade."""
+# --- Fonction principale d'entraînement et de sauvegarde (avec fuite de données) ---
+
+def train_and_save_leaky_model_correlated():
+    """Entraîne et sauvegarde un modèle après avoir ré-échantillonné AVANT la division, en utilisant les 5 variables les plus corrélées."""
     try:
         # 1. Charger les données
         df = load_data('data/Students Performance Dataset.csv')
@@ -37,10 +40,8 @@ def train_and_save_grade_model():
             
         print("✅ Données chargées avec succès pour la prédiction du grade.")
 
-        # --- Définition des features et de la cible ---
+        # 2. Définir les features et la cible
         target = 'Grade'
-        
-        # Colonnes à ignorer pour l'entraînement
         ignore_cols = [
             'Student_ID', 
             'First_Name', 
@@ -50,54 +51,79 @@ def train_and_save_grade_model():
             'Total_Score'
         ]
         
-        # Séparer les features (X) et la cible (y)
         y = df[target]
         X = df.drop(columns=ignore_cols + [target], errors='ignore')
 
-        # Identifier automatiquement les variables numériques et catégorielles
-        numerical_features = X.select_dtypes(include=['float64', 'int64']).columns.tolist()
-        categorical_features = X.select_dtypes(include=['object']).columns.tolist()
+        # Encodage de la cible pour le calcul de corrélation
+        label_encoder = LabelEncoder()
+        y_encoded_for_corr = label_encoder.fit_transform(y)
         
-        print(f"\nVariables numériques détectées: {numerical_features}")
-        print(f"Variables catégorielles détectées: {categorical_features}")
+        # Identifier les variables numériques
+        numerical_features_all = X.select_dtypes(include=['float64', 'int64']).columns.tolist()
+        categorical_features_all = X.select_dtypes(include=['object']).columns.tolist()
 
-        # --- Création du pipeline de prétraitement ---
+        # 3. Calculer les corrélations et sélectionner les meilleures variables
+        print("\n⏳ Calcul des corrélations pour la sélection de variables...")
+        df_temp = X.copy()
+        df_temp[target] = y_encoded_for_corr
+        
+        correlations = df_temp.corr(method='spearman', numeric_only=True)[target].abs().sort_values(ascending=False)
+        
+        # Sélectionner les 5 plus corrélées, en excluant la cible elle-même
+        correlated_features = correlations.index[1:6].tolist()
+        print(f"✅ 5 variables numériques les plus corrélées avec le grade: {correlated_features}")
+        
+        # 4. Définir les nouvelles listes de features pour le prétraitement
+        numerical_features = correlated_features
+        # On garde toutes les variables catégorielles
+        categorical_features = categorical_features_all
+
+        # 5. Création du pré-processeur
         preprocessor = ColumnTransformer(
             transformers=[
                 ('num', StandardScaler(), numerical_features),
                 ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
-            ])
+            ],
+            remainder='passthrough'
+        )
+
+        # Transformation des données complètes pour appliquer SMOTE
+        X_preprocessed = preprocessor.fit_transform(X)
         
-        # --- Création du pipeline d'entraînement avec SMOTE ---
-        # Utiliser l'option 'all' pour suréchantillonner toutes les classes minoritaires
-        model_pipeline = ImbPipeline(steps=[
-            ('preprocessor', preprocessor),
-            ('smote', SMOTE(sampling_strategy='all', random_state=42)),
-            ('classifier', RandomForestClassifier(n_estimators=100, random_state=42))
-        ])
-
-        # --- Entraînement et évaluation du modèle ---
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        print("\n⏳ Application de SMOTE sur l'ensemble complet de données (FUITE DE DONNÉES)...")
+        # 6. Application de SMOTE sur l'ensemble de données complet
+        smote = SMOTE(random_state=42)
+        X_resampled, y_resampled = smote.fit_resample(X_preprocessed, y_encoded_for_corr)
         
-        # Entraîner le pipeline complet
-        model_pipeline.fit(X_train, y_train)
+        print(f"✅ Jeu de données ré-échantillonné. Taille initiale: {len(X)}. Nouvelle taille: {len(X_resampled)}")
 
-        # Faire des prédictions sur le jeu de test
-        y_pred = model_pipeline.predict(X_test)
+        # 7. Division des données ré-échantillonnées
+        X_train, X_test, y_train, y_test = train_test_split(X_resampled, y_resampled, test_size=0.2, random_state=42)
+        
+        # 8. Entraînement d'un classifieur sans pipeline Imb
+        classifier = XGBClassifier(n_estimators=100, use_label_encoder=False, eval_metric='mlogloss', random_state=42)
+        classifier.fit(X_train, y_train)
 
-        # Évaluer le modèle
-        accuracy = accuracy_score(y_test, y_pred)
-        report = classification_report(y_test, y_pred)
+        # 9. Évaluation finale
+        y_pred = classifier.predict(X_test)
+        
+        # Inverser l'encodage pour l'affichage des résultats
+        y_test_labels = label_encoder.inverse_transform(y_test)
+        y_pred_labels = label_encoder.inverse_transform(y_pred)
 
-        print(f"\n--- Évaluation du modèle de Prédiction du Grade ---")
-        print(f"Précision (Accuracy): {accuracy:.2f}")
+        accuracy = accuracy_score(y_test_labels, y_pred_labels)
+        report = classification_report(y_test_labels, y_pred_labels)
+
+        print(f"\n--- Évaluation du Modèle (Résultats trompeurs en raison de la fuite de données) ---")
+        print(f"Précision (Accuracy) finale: {accuracy:.4f}")
         print("\nRapport de classification:\n", report)
 
-        # Sauvegarder le modèle entraîné
-        save_model(model_pipeline, 'grade_prediction_model.joblib')
+        # 10. Sauvegarde du modèle et du pré-processeur
+        save_model(classifier, 'leaky_model_correlated_classifier.joblib')
+        save_model(preprocessor, 'leaky_model_correlated_preprocessor.joblib')
         
     except Exception as e:
         print(f"❌ Une erreur est survenue : {e}")
 
 if __name__ == "__main__":
-    train_and_save_grade_model()
+    train_and_save_leaky_model_correlated()
