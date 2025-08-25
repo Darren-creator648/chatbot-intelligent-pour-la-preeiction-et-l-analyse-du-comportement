@@ -15,8 +15,10 @@
     "lucide-react": "^0.534.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-markdown": "^10.1.0",
     "react-scripts": "5.0.1",
     "recharts": "^3.1.0",
+    "rehype-raw": "^7.0.0",
     "web-vitals": "^2.1.4"
   },
   "scripts": {

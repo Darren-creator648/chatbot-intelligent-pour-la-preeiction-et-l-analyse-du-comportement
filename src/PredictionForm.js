@@ -13,6 +13,8 @@ import {
   Snackbar,
   Alert
 } from '@mui/material';
+import Markdown from 'react-markdown'; // <-- Import de la librairie pour afficher le Markdown
+import rehypeRaw from 'rehype-raw'; // <-- Pour le rendu HTML si nécessaire
 
 // Remarque : Remplacez par l'URL de votre API si elle est différente
 const API_BASE_URL = 'http://localhost:5000/api'; 
@@ -38,14 +40,14 @@ const PredictionForm = ({ token }) => {
     Internet_Access_at_Home: '',
 
     // Données pour le modèle de prédiction d'anxiété
-    sexe: '',
-    filiere: '',
+    sexe: '', // Ce champ peut être dérivé de Gender
+    filiere: '', // Ce champ peut être dérivé de Department
     annee_etude: '',
     mgp: '',
     status: '',
-    depression: '', // Ajout du champ manquant
-    crise_de_panique: '', // Ajout du champ manquant
-    traitement_spe: '', // Ajout du champ manquant
+    depression: '', 
+    crise_de_panique: '', 
+    traitement_spe: '', 
   });
 
   const [prediction, setPrediction] = useState(null);
@@ -65,6 +67,8 @@ const PredictionForm = ({ token }) => {
     setPrediction(null);
 
     const combinedData = {
+        // Le backend gère la sélection des 5 meilleures variables pour le grade
+        // On envoie donc toutes les données nécessaires aux deux modèles
         Age: parseFloat(formData.Age),
         Gender: formData.Gender,
         Department: formData.Department,
@@ -81,14 +85,15 @@ const PredictionForm = ({ token }) => {
         'Stress_Level (1-10)': parseFloat(formData['Stress_Level (1-10)']),
         Extracurricular_Activities: formData.Extracurricular_Activities,
         Internet_Access_at_Home: formData.Internet_Access_at_Home,
-        sexe: formData.Gender === 'Male' ? 'Male' : 'Female',
+        // Données pour le modèle d'anxiété
+        sexe: formData.Gender,
         filiere: formData.Department,
         annee_etude: formData.annee_etude,
         mgp: parseFloat(formData.mgp),
         status: formData.status,
-        depression: formData.depression, // Ajout de la variable
-        crise_de_panique: formData.crise_de_panique, // Ajout de la variable
-        traitement_spe: formData.traitement_spe, // Ajout de la variable
+        depression: parseFloat(formData.depression), 
+        crise_de_panique: parseFloat(formData.crise_de_panique), 
+        traitement_spe: parseFloat(formData.traitement_spe), 
     };
 
     try {
@@ -129,7 +134,7 @@ const PredictionForm = ({ token }) => {
             <Grid item xs={12}>
               <Typography variant="h6" gutterBottom>Informations de Performance Académique</Typography>
             </Grid>
-            {/* ... (les champs existants) ... */}
+            {/* Les champs correspondants aux 5 variables corrélées restent importants */}
             <Grid item xs={12} sm={6}>
               <TextField label="Âge" name="Age" type="number" fullWidth required value={formData.Age} onChange={handleChange} />
             </Grid>
@@ -148,22 +153,6 @@ const PredictionForm = ({ token }) => {
                 <MenuItem value="Business">Business</MenuItem>
                 <MenuItem value="Law">Droit</MenuItem>
                 <MenuItem value="Medicine">Médecine</MenuItem>
-              </TextField>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField select label="Niveau d'éducation des parents" name="Parent_Education_Level" fullWidth required value={formData.Parent_Education_Level} onChange={handleChange}>
-                <MenuItem value="High School">Lycée</MenuItem>
-                <MenuItem value="Associate's Degree">Associate's Degree</MenuItem>
-                <MenuItem value="Bachelor's Degree">Licence</MenuItem>
-                <MenuItem value="Master's Degree">Master</MenuItem>
-                <MenuItem value="PhD">Doctorat</MenuItem>
-              </TextField>
-            </Grid>
-            <Grid item xs={12} sm={6}>
-              <TextField select label="Revenu familial" name="Family_Income_Level" fullWidth required value={formData.Family_Income_Level} onChange={handleChange}>
-                <MenuItem value="Low">Faible</MenuItem>
-                <MenuItem value="Medium">Moyen</MenuItem>
-                <MenuItem value="High">Élevé</MenuItem>
               </TextField>
             </Grid>
             <Grid item xs={12} sm={6}>
@@ -227,7 +216,6 @@ const PredictionForm = ({ token }) => {
                     <MenuItem value="Married">Marié(e)</MenuItem>
                 </TextField>
             </Grid>
-            {/* NOUVEAUX CHAMPS AJOUTÉS */}
             <Grid item xs={12} sm={6}>
                 <TextField select label="Souffrez-vous de dépression ?" name="depression" fullWidth required value={formData.depression} onChange={handleChange}>
                     <MenuItem value="1">Oui</MenuItem>
@@ -260,9 +248,16 @@ const PredictionForm = ({ token }) => {
             <Paper elevation={2} sx={{ p: 2, mt: 2 }}>
               <Typography variant="h6">Grade Prédit : {prediction.grade_prediction}</Typography>
               <Typography variant="h6">Niveau d'Anxiété Prédit : {prediction.anxiety_prediction}</Typography>
+              
+              {/* NOUVEAU : Affichage de l'analyse générée */}
+              <Box sx={{ mt: 3, textAlign: 'left' }}>
+                <Typography variant="h6">Analyse Personnalisée :</Typography>
+                <Markdown rehypePlugins={[rehypeRaw]}>{prediction.analysis}</Markdown>
+              </Box>
             </Paper>
           </Box>
         )}
+        
         
         <Snackbar open={snackbarOpen} autoHideDuration={6000} onClose={handleSnackbarClose}>
           <Alert onClose={handleSnackbarClose} severity="error" sx={{ width: '100%' }}>
